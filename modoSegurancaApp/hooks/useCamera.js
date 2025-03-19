@@ -5,7 +5,7 @@ import * as MediaLibrary from 'expo-media-library';
 
 export default function useCamera() {
   const [hasPermission, setHasPermission] = useState(null);
-  const [type, setType] = useState(Camera.Constants.Type ? Camera.Constants.Type.back : 'back');
+  const [type, setType] = useState('back');
   const cameraRef = useRef(null);
   
   useEffect(() => {

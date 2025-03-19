@@ -159,7 +159,7 @@ export default function SecuritySystem() {
             <Camera 
               ref={cameraRef}
               style={styles.camera}
-              type={type}
+              type={type || 'back'}
             />
           )}
         </View>

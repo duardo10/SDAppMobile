@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Sensors } from 'expo-sensors';
+import * as Sensors from 'expo-sensors';
 
 export default function useProximitySensor() {
   const [isProximityAvailable, setIsProximityAvailable] = useState(false);
@@ -14,17 +14,26 @@ export default function useProximitySensor() {
   }, []);
   
   const checkAvailability = async () => {
-    const isAvailable = await Sensors.Proximity.isAvailableAsync();
-    setIsProximityAvailable(isAvailable);
+    try {
+      const isAvailable = await Sensors.Proximity.isAvailableAsync();
+      setIsProximityAvailable(isAvailable);
+    } catch (error) {
+      console.error('Error checking proximity availability:', error);
+      setIsProximityAvailable(false);
+    }
   };
   
   const subscribe = (callback) => {
     unsubscribe();
-    const newSubscription = Sensors.Proximity.addListener(data => {
-      setProximityData(data);
-      if (callback) callback(data);
-    });
-    setSubscription(newSubscription);
+    try {
+      const newSubscription = Sensors.Proximity.addListener(data => {
+        setProximityData(data);
+        if (callback) callback(data);
+      });
+      setSubscription(newSubscription);
+    } catch (error) {
+      console.error('Error subscribing to proximity sensor:', error);
+    }
   };
   
   const unsubscribe = () => {
