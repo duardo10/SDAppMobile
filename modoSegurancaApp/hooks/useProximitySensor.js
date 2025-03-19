@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import * as Sensors from 'expo-sensors';
 
 export default function useProximitySensor() {
@@ -15,8 +15,14 @@ export default function useProximitySensor() {
   
   const checkAvailability = async () => {
     try {
-      const isAvailable = await Sensors.Proximity.isAvailableAsync();
-      setIsProximityAvailable(isAvailable);
+      // Verificar se o ProximitySensor existe no objeto Sensors
+      if (Sensors.ProximitySensor) {
+        const isAvailable = await Sensors.ProximitySensor.isAvailableAsync();
+        setIsProximityAvailable(isAvailable);
+      } else {
+        console.log('ProximitySensor não está disponível nesta plataforma');
+        setIsProximityAvailable(false);
+      }
     } catch (error) {
       console.error('Error checking proximity availability:', error);
       setIsProximityAvailable(false);
@@ -26,11 +32,14 @@ export default function useProximitySensor() {
   const subscribe = (callback) => {
     unsubscribe();
     try {
-      const newSubscription = Sensors.Proximity.addListener(data => {
-        setProximityData(data);
-        if (callback) callback(data);
-      });
-      setSubscription(newSubscription);
+      // Verificar se o ProximitySensor existe antes de usar
+      if (Sensors.ProximitySensor) {
+        const newSubscription = Sensors.ProximitySensor.addListener(data => {
+          setProximityData(data);
+          if (callback) callback(data);
+        });
+        setSubscription(newSubscription);
+      }
     } catch (error) {
       console.error('Error subscribing to proximity sensor:', error);
     }

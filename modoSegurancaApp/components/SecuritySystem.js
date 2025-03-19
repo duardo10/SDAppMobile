@@ -12,7 +12,7 @@ export default function SecuritySystem() {
   const [securityMode, setSecurityMode] = useState(false);
   const [isAlarmActive, setIsAlarmActive] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
-  const [serverSettings, setServerSettings] = useState({ url: 'http://192.168.1.100:5000' });
+  const [serverSettings, setServerSettings] = useState({ url: 'http://10.0.0.102:5000' });
   
   const { isProximityAvailable, proximityData, subscribe, unsubscribe } = useProximitySensor();
   const { hasPermission, cameraRef, type, takePhoto } = useCamera();
@@ -155,12 +155,21 @@ export default function SecuritySystem() {
         animationType="slide"
       >
         <View style={styles.cameraContainer}>
-          {cameraRef && (
-            <Camera 
-              ref={cameraRef}
-              style={styles.camera}
-              type={type || 'back'}
-            />
+          {/* Modificar esta parte do código */}
+          {showCamera && (
+            <View style={styles.cameraContainer}>
+              {cameraRef ? (
+                <Camera 
+                  ref={cameraRef}
+                  style={styles.camera}
+                  type={type || Camera.Constants.Type.back}
+                />
+              ) : (
+                <View style={styles.camera}>
+                  <Text>Camera não disponível</Text>
+                </View>
+              )}
+            </View>
           )}
         </View>
       </Modal>
