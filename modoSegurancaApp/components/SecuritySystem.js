@@ -15,7 +15,7 @@ export default function SecuritySystem() {
   const [serverSettings, setServerSettings] = useState({ url: 'http://192.168.1.100:5000' });
   
   const { isProximityAvailable, proximityData, subscribe, unsubscribe } = useProximitySensor();
-  const { hasPermission, cameraRef, takePhoto } = useCamera();
+  const { hasPermission, cameraRef, type, takePhoto } = useCamera();
   const { isConnected, testConnection, sendAlert, sendPhoto } = useServer(serverSettings.url);
   
   const soundRef = useRef(null);
@@ -155,11 +155,13 @@ export default function SecuritySystem() {
         animationType="slide"
       >
         <View style={styles.cameraContainer}>
-          <Camera 
-            ref={cameraRef}
-            style={styles.camera}
-            type={Camera.Constants.Type.back}
-          />
+          {cameraRef && (
+            <Camera 
+              ref={cameraRef}
+              style={styles.camera}
+              type={type}
+            />
+          )}
         </View>
       </Modal>
     </View>
