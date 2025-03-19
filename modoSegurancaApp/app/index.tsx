@@ -6,14 +6,14 @@ import * as Camera from 'expo-camera';
 import SecuritySystem from '../components/SecuritySystem';
 
 // Simple error boundary component
-class ErrorBoundary extends React.Component {
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }> {
   state = { hasError: false, errorMessage: '' };
 
-  static getDerivedStateFromError(error) {
+  static getDerivedStateFromError(error: Error) {
     return { hasError: true, errorMessage: error.toString() };
   }
 
-  componentDidCatch(error, errorInfo) {
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
     console.error("Error caught by boundary:", error, errorInfo);
   }
 
@@ -36,11 +36,12 @@ class ErrorBoundary extends React.Component {
 }
 
 export default function App() {
-  const [cameraPermission, setCameraPermission] = useState(null);
+  const [permission, requestPermission] = Camera.useCameraPermissions();
+  const [cameraPermission, setCameraPermission] = useState<boolean | null>(null);
   
   useEffect(() => {
     (async () => {
-      const { status } = await Camera.requestCameraPermissionsAsync();
+      const { status } = await requestPermission();
       setCameraPermission(status === 'granted');
     })();
   }, []);
