@@ -12,11 +12,11 @@ export default function SecuritySystem() {
   const [securityMode, setSecurityMode] = useState(false);
   const [isAlarmActive, setIsAlarmActive] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
-  const [serverSettings, setServerSettings] = useState({ url: 'http://10.0.0.102:5000' });
+  const [serverSettings, setServerSettings] = useState({ url: 'http://10.180.41.53:5000' });
   
   const { isProximityAvailable, proximityData, subscribe, unsubscribe } = useProximitySensor();
   const { hasPermission, cameraRef, type, takePhoto } = useCamera();
-  const { isConnected, testConnection, sendAlert, sendPhoto } = useServer(serverSettings.url);
+  const { isConnected, lastError, connectionStatus, testConnection, sendAlert, sendPhoto } = useServer(serverSettings.url);
   
   const soundRef = useRef(null);
   
@@ -52,32 +52,79 @@ export default function SecuritySystem() {
     }
   };
   
+  // Função triggerSecurity melhorada para o componente SecuritySystem
   const triggerSecurity = async () => {
+    console.log('🚨 INICIANDO PROCEDIMENTO DE SEGURANÇA 🚨');
+    setShowCamera(true);
+    
     try {
-      // Show camera view briefly
-      setShowCamera(true);
+      // Enviar alerta para o servidor com dados do sensor
+      console.log('⚠️ Enviando alerta com dados do sensor');
+      const alertData = {
+        sensorData: {
+          proximityDistance: proximityData.distance,
+          proximityAccuracy: proximityData.accuracy
+        }
+      };
       
-      // Send alert to server
-      await sendAlert();
+      // Enviando alerta em paralelo enquanto preparamos a câmera
+      const alertPromise = sendAlert(alertData).catch(error => {
+        console.error('❌ Erro ao enviar alerta:', error);
+        // Continue mesmo se falhar o envio do alerta
+        return { status: 'error', error: error.message };
+      });
       
-      // Play alarm
+      // Tocar alarme local
+      console.log('🔊 Iniciando alarme local');
       playAlarm();
       
-      // Take photo after a short delay
-      setTimeout(async () => {
-        const photo = await takePhoto();
-        if (photo) {
-          // Send photo to server
-          await sendPhoto(photo.uri);
+      // Esperar um momento para a câmera inicializar
+      console.log('⏳ Aguardando inicialização da câmera');
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Capturar foto
+      console.log('📸 Tentando capturar foto');
+      const photo = await takePhoto();
+      console.log(photo ? '✅ Foto capturada com sucesso' : '❌ Falha ao capturar foto');
+      
+      // Aguardar resultado do envio do alerta
+      const alertResult = await alertPromise;
+      console.log('📡 Resultado do envio de alerta:', alertResult);
+      
+      if (photo) {
+        try {
+          // Enviar foto para o servidor
+          console.log('⬆️ Enviando foto para o servidor:', photo.uri);
+          const photoResult = await sendPhoto(photo.uri);
+          console.log('✅ Foto enviada com sucesso:', photoResult);
+        } catch (photoError) {
+          console.error('❌ Erro ao enviar foto:', photoError);
+          // Não vamos lançar exceção aqui para permitir que o processo continue
         }
-        
-        // Hide camera after capturing
-        setTimeout(() => {
-          setShowCamera(false);
-        }, 1000);
-      }, 500);
+      }
+      
+      // Esconder câmera após um momento
+      console.log('⏳ Ocultando câmera em 1 segundo');
+      setTimeout(() => {
+        setShowCamera(false);
+        console.log('✅ Procedimento de segurança concluído');
+      }, 1000);
+      
     } catch (error) {
-      console.error('Error triggering security:', error);
+      console.error('❌ ERRO CRÍTICO no procedimento de segurança:', error);
+      
+      // Esconder câmera em caso de falha
+      setTimeout(() => {
+        setShowCamera(false);
+        console.log('⚠️ Procedimento de segurança falhou');
+        
+        // Notificar o usuário sobre o erro
+        Alert.alert(
+          'Erro no sistema de segurança',
+          `Ocorreu um erro ao acionar o alarme: ${error.message}`,
+          [{ text: 'OK' }]
+        );
+      }, 1000);
     }
   };
   
@@ -118,9 +165,21 @@ export default function SecuritySystem() {
         <Text style={styles.statusText}>
           Proximity Sensor: {isProximityAvailable ? 'Available' : 'Not Available'}
         </Text>
-        <Text style={styles.statusText}>
-          Server: {isConnected ? 'Connected' : 'Disconnected'}
+        <Text style={[
+          styles.statusText,
+          connectionStatus === 'connected' && styles.statusConnected,
+          connectionStatus === 'connecting' && styles.statusConnecting,
+          connectionStatus === 'error' && styles.statusError
+        ]}>
+          Server: {connectionStatus === 'connected' ? 'Connected' : 
+                 connectionStatus === 'connecting' ? 'Connecting...' : 
+                 connectionStatus === 'error' ? 'Connection Error' : 'Disconnected'}
         </Text>
+        {lastError && (
+          <Text style={styles.errorText}>
+            Error: {lastError}
+          </Text>
+        )}
         <Text style={styles.statusText}>
           Security Mode: {securityMode ? 'Active' : 'Inactive'}
         </Text>
@@ -227,5 +286,22 @@ const styles = StyleSheet.create({
   },
   camera: {
     flex: 1,
+  },
+  statusConnected: {
+    color: '#4CAF50',
+    fontWeight: 'bold',
+  },
+  statusConnecting: {
+    color: '#FFA000',
+    fontWeight: 'bold',
+  },
+  statusError: {
+    color: '#F44336',
+    fontWeight: 'bold',
+  },
+  errorText: {
+    color: '#F44336',
+    fontSize: 14,
+    marginTop: 4,
   },
 });

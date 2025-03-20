@@ -1,169 +1,172 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
+import * as FileSystem from 'expo-file-system';
 
 export default function useServer(serverUrl) {
   const [isConnected, setIsConnected] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState('disconnected');
   const [lastError, setLastError] = useState(null);
-
-  // Função para testar a conexão com o servidor
+  
+  const logRequest = (method, url, body = null) => {
+    console.log(`🌐 REQUEST: ${method} ${url}`);
+    if (body) {
+      console.log(`📦 REQUEST BODY:`, body);
+    }
+  };
+  
+  const logResponse = (status, data) => {
+    console.log(`✅ RESPONSE: Status ${status}`);
+    console.log(`📄 RESPONSE DATA:`, data);
+  };
+  
+  const logError = (method, url, error) => {
+    console.error(`❌ ERROR in ${method} ${url}:`, error);
+    setLastError(error.message || 'Erro desconhecido na conexão');
+  };
+  
   const testConnection = useCallback(async () => {
+    setConnectionStatus('connecting');
+    setLastError(null);
+    
     try {
-      console.log(`Tentando conectar ao servidor: ${serverUrl}`);
+      const url = `${serverUrl}/ping`;
+      logRequest('GET', url);
       
-      // Adiciona um timeout para a requisição
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
-      
-      const response = await fetch(`${serverUrl}/ping`, {
+      const response = await fetch(url, {
         method: 'GET',
-        signal: controller.signal,
         headers: {
           'Accept': 'application/json',
           'Content-Type': 'application/json',
         },
       });
       
-      clearTimeout(timeoutId);
+      const data = await response.json();
+      logResponse(response.status, data);
       
-      if (response.ok) {
-        console.log('Conexão com servidor bem-sucedida');
+      if (response.ok && data.status === 'ok') {
         setIsConnected(true);
-        setLastError(null);
+        setConnectionStatus('connected');
         return true;
       } else {
-        const errorData = await response.json();
-        console.error('Erro na conexão com servidor:', errorData);
-        setIsConnected(false);
-        setLastError(`Erro ${response.status}: ${errorData.message || 'Desconhecido'}`);
-        return false;
+        throw new Error(data.message || 'Resposta do servidor inválida');
       }
     } catch (error) {
-      console.error('Erro ao tentar conectar ao servidor:', error.message);
+      logError('GET', `${serverUrl}/ping`, error);
       setIsConnected(false);
-      setLastError(error.message);
+      setConnectionStatus('error');
       return false;
     }
   }, [serverUrl]);
-
-  // Envia um alerta para o servidor
-  const sendAlert = async () => {
-    if (!isConnected) {
-      console.log('Tentando reconectar ao servidor antes de enviar alerta...');
-      const reconnected = await testConnection();
-      if (!reconnected) {
-        throw new Error('Não foi possível conectar ao servidor');
-      }
-    }
-
+  
+  const sendAlert = useCallback(async (extraData = {}) => {
     try {
-      const timestamp = new Date().toISOString();
-      const response = await fetch(`${serverUrl}/alert`, {
+      const url = `${serverUrl}/alert`;
+      const body = {
+        timestamp: new Date().toISOString(),
+        deviceInfo: {
+          platform: Platform.OS,
+          version: Platform.Version
+        },
+        ...extraData
+      };
+      
+      logRequest('POST', url, body);
+      
+      console.log('⚠️ Enviando alerta para o servidor');
+      const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Accept': 'application/json',
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ timestamp }),
+        body: JSON.stringify(body)
       });
-
+      
+      const data = await response.json();
+      logResponse(response.status, data);
+      
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Erro ao enviar alerta');
+        console.warn('⚠️ Servidor retornou erro ao enviar alerta:', data.message);
+        throw new Error(data.message || 'Falha ao enviar alerta');
       }
-
-      return await response.json();
+      
+      console.log('✅ Alerta enviado com sucesso');
+      return data;
     } catch (error) {
-      console.error('Erro ao enviar alerta:', error);
+      logError('POST', `${serverUrl}/alert`, error);
       throw error;
     }
-  };
-
-  // Envia uma foto para o servidor
-  const sendPhoto = async (photoUri) => {
-    if (!isConnected) {
-      console.log('Tentando reconectar ao servidor antes de enviar foto...');
-      const reconnected = await testConnection();
-      if (!reconnected) {
-        throw new Error('Não foi possível conectar ao servidor');
-      }
-    }
-
+  }, [serverUrl]);
+  
+  const sendPhoto = useCallback(async (photoUri) => {
     try {
+      const url = `${serverUrl}/upload-photo`;
+      
+      console.log('📸 Preparando para enviar foto:', photoUri);
+      logRequest('POST', url, { photoUri: photoUri });
+      
+      // Criar form data para upload do arquivo
       const formData = new FormData();
-      const timestamp = new Date().toISOString();
-      
-      // Cria o objeto de arquivo a partir do URI
-      const fileType = photoUri.split('.').pop();
-      const fileName = `photo_${timestamp}.${fileType}`;
-      
       formData.append('photo', {
         uri: photoUri,
-        name: fileName,
-        type: `image/${fileType}`,
+        name: 'photo.jpg',
+        type: 'image/jpeg'
       });
+      formData.append('timestamp', new Date().toISOString());
       
-      formData.append('timestamp', timestamp);
-
-      const response = await fetch(`${serverUrl}/upload-photo`, {
-        method: 'POST',
-        headers: {
-          'Accept': 'application/json',
-        },
-        body: formData,
+      console.log('⬆️ Iniciando upload da foto');
+      
+      // Para requisições com arquivos, usamos XMLHttpRequest para monitorar o progresso
+      return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        
+        xhr.onreadystatechange = function() {
+          if (xhr.readyState !== XMLHttpRequest.DONE) return;
+          
+          console.log(`📊 Resposta do upload (status ${xhr.status})`);
+          
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              const response = JSON.parse(xhr.responseText);
+              logResponse(xhr.status, response);
+              console.log('✅ Foto enviada com sucesso');
+              resolve(response);
+            } catch (e) {
+              console.error('❌ Erro ao processar resposta do servidor:', e);
+              reject(new Error('Erro ao processar resposta do servidor'));
+            }
+          } else {
+            console.error('❌ Erro no upload da foto:', xhr.status, xhr.responseText);
+            try {
+              const errorData = JSON.parse(xhr.responseText);
+              reject(new Error(errorData.message || 'Falha ao enviar foto'));
+            } catch (e) {
+              reject(new Error(`Erro HTTP ${xhr.status}`));
+            }
+          }
+        };
+        
+        xhr.upload.onprogress = function(e) {
+          if (e.lengthComputable) {
+            const percentComplete = (e.loaded / e.total) * 100;
+            console.log(`📤 Progresso do upload: ${percentComplete.toFixed(2)}%`);
+          }
+        };
+        
+        xhr.open('POST', url);
+        xhr.send(formData);
       });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Erro ao enviar foto');
-      }
-
-      return await response.json();
     } catch (error) {
-      console.error('Erro ao enviar foto:', error);
+      logError('POST', `${serverUrl}/upload-photo`, error);
       throw error;
     }
-  };
-
-  // Pára o alarme no servidor
-  const stopAlarm = async () => {
-    try {
-      const response = await fetch(`${serverUrl}/stop-alarm`, {
-        method: 'POST',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Erro ao parar alarme');
-      }
-
-      return await response.json();
-    } catch (error) {
-      console.error('Erro ao parar alarme:', error);
-      throw error;
-    }
-  };
-
-  // Testa a conexão quando o componente é montado ou quando a URL muda
-  useEffect(() => {
-    testConnection();
-    
-    // Configurar polling para verificar a conexão periodicamente
-    const intervalId = setInterval(testConnection, 30000); // 30 segundos
-    
-    return () => {
-      clearInterval(intervalId);
-    };
-  }, [serverUrl, testConnection]);
-
+  }, [serverUrl]);
+  
   return {
     isConnected,
+    connectionStatus,
     lastError,
     testConnection,
     sendAlert,
-    sendPhoto,
-    stopAlarm,
+    sendPhoto
   };
 }
