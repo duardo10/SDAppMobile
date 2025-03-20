@@ -1,172 +1,166 @@
 import { useState, useCallback } from 'react';
+import axios from 'axios';
 import * as FileSystem from 'expo-file-system';
 
 export default function useServer(serverUrl) {
   const [isConnected, setIsConnected] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState('disconnected');
   const [lastError, setLastError] = useState(null);
-  
-  const logRequest = (method, url, body = null) => {
-    console.log(`🌐 REQUEST: ${method} ${url}`);
-    if (body) {
-      console.log(`📦 REQUEST BODY:`, body);
-    }
-  };
-  
-  const logResponse = (status, data) => {
-    console.log(`✅ RESPONSE: Status ${status}`);
-    console.log(`📄 RESPONSE DATA:`, data);
-  };
-  
-  const logError = (method, url, error) => {
-    console.error(`❌ ERROR in ${method} ${url}:`, error);
-    setLastError(error.message || 'Erro desconhecido na conexão');
-  };
-  
+  const [connectionStatus, setConnectionStatus] = useState('disconnected'); // 'disconnected', 'connecting', 'connected', 'error'
+
   const testConnection = useCallback(async () => {
     setConnectionStatus('connecting');
     setLastError(null);
     
     try {
-      const url = `${serverUrl}/ping`;
-      logRequest('GET', url);
+      console.log(`Testando conexão com: ${serverUrl}/ping`);
+      const response = await axios.get(`${serverUrl}/ping`, { timeout: 5000 });
       
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-        },
-      });
-      
-      const data = await response.json();
-      logResponse(response.status, data);
-      
-      if (response.ok && data.status === 'ok') {
+      if (response.data && response.data.status === 'ok') {
+        console.log('✅ Conexão com servidor estabelecida!');
         setIsConnected(true);
         setConnectionStatus('connected');
         return true;
       } else {
-        throw new Error(data.message || 'Resposta do servidor inválida');
+        throw new Error('Resposta inesperada do servidor');
       }
     } catch (error) {
-      logError('GET', `${serverUrl}/ping`, error);
+      console.error('❌ Erro de conexão:', error.message);
       setIsConnected(false);
+      setLastError(error.message);
       setConnectionStatus('error');
       return false;
     }
   }, [serverUrl]);
-  
-  const sendAlert = useCallback(async (extraData = {}) => {
+
+  const sendAlert = useCallback(async (alertData = {}) => {
+    if (!isConnected) {
+      console.warn('⚠️ Tentando enviar alerta sem conexão estabelecida');
+    }
+    
     try {
-      const url = `${serverUrl}/alert`;
-      const body = {
-        timestamp: new Date().toISOString(),
-        deviceInfo: {
-          platform: Platform.OS,
-          version: Platform.Version
-        },
-        ...extraData
-      };
+      console.log(`Enviando alerta para: ${serverUrl}/alert`);
       
-      logRequest('POST', url, body);
-      
-      console.log('⚠️ Enviando alerta para o servidor');
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(body)
-      });
-      
-      const data = await response.json();
-      logResponse(response.status, data);
-      
-      if (!response.ok) {
-        console.warn('⚠️ Servidor retornou erro ao enviar alerta:', data.message);
-        throw new Error(data.message || 'Falha ao enviar alerta');
+      // Adicionar timestamp se não existir
+      if (!alertData.timestamp) {
+        alertData.timestamp = new Date().toISOString();
       }
       
-      console.log('✅ Alerta enviado com sucesso');
-      return data;
+      const response = await axios.post(`${serverUrl}/alert`, alertData, {
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        timeout: 10000,
+      });
+      
+      console.log('📡 Resposta do servidor ao alerta:', response.data);
+      return response.data;
     } catch (error) {
-      logError('POST', `${serverUrl}/alert`, error);
+      console.error('❌ Erro ao enviar alerta:', error.message);
+      setLastError(`Falha ao enviar alerta: ${error.message}`);
       throw error;
     }
-  }, [serverUrl]);
-  
+  }, [serverUrl, isConnected]);
+
   const sendPhoto = useCallback(async (photoUri) => {
+    if (!isConnected) {
+      console.warn('⚠️ Tentando enviar foto sem conexão estabelecida');
+    }
+    
     try {
-      const url = `${serverUrl}/upload-photo`;
+      console.log(`Enviando foto para: ${serverUrl}/upload-photo`);
       
-      console.log('📸 Preparando para enviar foto:', photoUri);
-      logRequest('POST', url, { photoUri: photoUri });
-      
-      // Criar form data para upload do arquivo
+      // Criar FormData para envio de arquivo
       const formData = new FormData();
-      formData.append('photo', {
-        uri: photoUri,
-        name: 'photo.jpg',
-        type: 'image/jpeg'
-      });
       formData.append('timestamp', new Date().toISOString());
       
-      console.log('⬆️ Iniciando upload da foto');
+      // Adicionar arquivo de foto
+      const fileInfo = await FileSystem.getInfoAsync(photoUri);
       
-      // Para requisições com arquivos, usamos XMLHttpRequest para monitorar o progresso
-      return new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        
-        xhr.onreadystatechange = function() {
-          if (xhr.readyState !== XMLHttpRequest.DONE) return;
-          
-          console.log(`📊 Resposta do upload (status ${xhr.status})`);
-          
-          if (xhr.status >= 200 && xhr.status < 300) {
-            try {
-              const response = JSON.parse(xhr.responseText);
-              logResponse(xhr.status, response);
-              console.log('✅ Foto enviada com sucesso');
-              resolve(response);
-            } catch (e) {
-              console.error('❌ Erro ao processar resposta do servidor:', e);
-              reject(new Error('Erro ao processar resposta do servidor'));
-            }
-          } else {
-            console.error('❌ Erro no upload da foto:', xhr.status, xhr.responseText);
-            try {
-              const errorData = JSON.parse(xhr.responseText);
-              reject(new Error(errorData.message || 'Falha ao enviar foto'));
-            } catch (e) {
-              reject(new Error(`Erro HTTP ${xhr.status}`));
-            }
-          }
-        };
-        
-        xhr.upload.onprogress = function(e) {
-          if (e.lengthComputable) {
-            const percentComplete = (e.loaded / e.total) * 100;
-            console.log(`📤 Progresso do upload: ${percentComplete.toFixed(2)}%`);
-          }
-        };
-        
-        xhr.open('POST', url);
-        xhr.send(formData);
+      if (!fileInfo.exists) {
+        throw new Error(`Arquivo não encontrado: ${photoUri}`);
+      }
+      
+      // Extrair nome do arquivo da URI
+      const fileName = photoUri.split('/').pop();
+      
+      formData.append('photo', {
+        uri: photoUri,
+        name: fileName || 'photo.jpg',
+        type: 'image/jpeg',
       });
+      
+      const response = await axios.post(`${serverUrl}/upload-photo`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+        timeout: 30000, // Timeout maior para upload de arquivos
+      });
+      
+      console.log('📡 Resposta do servidor ao upload de foto:', response.data);
+      return response.data;
     } catch (error) {
-      logError('POST', `${serverUrl}/upload-photo`, error);
+      console.error('❌ Erro ao enviar foto:', error.message);
+      setLastError(`Falha ao enviar foto: ${error.message}`);
       throw error;
     }
-  }, [serverUrl]);
-  
+  }, [serverUrl, isConnected]);
+
+  // Nova função para parar o alarme no servidor
+  const stopServerAlarm = useCallback(async () => {
+    if (!isConnected) {
+      console.warn('⚠️ Tentando parar alarme sem conexão estabelecida');
+    }
+    
+    try {
+      console.log(`Enviando comando para parar alarme: ${serverUrl}/stop-alarm`);
+      
+      const response = await axios.post(`${serverUrl}/stop-alarm`, {}, {
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        timeout: 5000,
+      });
+      
+      console.log('📡 Resposta do servidor ao parar alarme:', response.data);
+      return response.data;
+    } catch (error) {
+      console.error('❌ Erro ao parar alarme no servidor:', error.message);
+      setLastError(`Falha ao parar alarme: ${error.message}`);
+      throw error;
+    }
+  }, [serverUrl, isConnected]);
+
+  // Nova função para verificar o status do alarme no servidor
+  const getAlarmStatus = useCallback(async () => {
+    if (!isConnected) {
+      console.warn('⚠️ Tentando verificar status do alarme sem conexão estabelecida');
+      return null;
+    }
+    
+    try {
+      console.log(`Verificando status do alarme: ${serverUrl}/get-alarm-status`);
+      
+      const response = await axios.get(`${serverUrl}/get-alarm-status`, {
+        timeout: 5000,
+      });
+      
+      console.log('📡 Status do alarme no servidor:', response.data);
+      return response.data;
+    } catch (error) {
+      console.error('❌ Erro ao verificar status do alarme:', error.message);
+      // Não definimos lastError aqui para não poluir a interface
+      return null;
+    }
+  }, [serverUrl, isConnected]);
+
   return {
     isConnected,
-    connectionStatus,
     lastError,
+    connectionStatus,
     testConnection,
     sendAlert,
-    sendPhoto
+    sendPhoto,
+    stopServerAlarm,  // Nova função
+    getAlarmStatus    // Nova função
   };
 }

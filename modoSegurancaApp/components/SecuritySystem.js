@@ -11,19 +11,54 @@ import useServer from '../hooks/useServer';
 export default function SecuritySystem() {
   const [securityMode, setSecurityMode] = useState(false);
   const [isAlarmActive, setIsAlarmActive] = useState(false);
+  const [isServerAlarmActive, setIsServerAlarmActive] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
   const [serverSettings, setServerSettings] = useState({ url: 'http://10.180.41.53:5000' });
   
   const { isProximityAvailable, proximityData, subscribe, unsubscribe } = useProximitySensor();
   const { hasPermission, cameraRef, type, takePhoto } = useCamera();
-  const { isConnected, lastError, connectionStatus, testConnection, sendAlert, sendPhoto } = useServer(serverSettings.url);
+  const { 
+    isConnected, 
+    lastError, 
+    connectionStatus, 
+    testConnection, 
+    sendAlert, 
+    sendPhoto,
+    stopServerAlarm,
+    getAlarmStatus 
+  } = useServer(serverSettings.url);
   
   const soundRef = useRef(null);
   
   // Check server connection
   useEffect(() => {
     testConnection();
+    // Também verificar o status do alarme no servidor
+    checkServerAlarmStatus();
   }, [serverSettings.url]);
+  
+  // Função para verificar o status do alarme no servidor
+  const checkServerAlarmStatus = async () => {
+    try {
+      const status = await getAlarmStatus();
+      if (status && typeof status.alarm_active === 'boolean') {
+        setIsServerAlarmActive(status.alarm_active);
+      }
+    } catch (error) {
+      console.error('Erro ao verificar status do alarme no servidor:', error);
+    }
+  };
+  
+  // Verificar o status do alarme no servidor a cada 3 segundos
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (connectionStatus === 'connected') {
+        checkServerAlarmStatus();
+      }
+    }, 3000);
+    
+    return () => clearInterval(interval);
+  }, [connectionStatus]);
   
   // Cleanup function
   useEffect(() => {
@@ -36,8 +71,16 @@ export default function SecuritySystem() {
   // Setup proximity sensor when security mode changes
   useEffect(() => {
     if (securityMode) {
-      subscribe(handleProximityChange);
-      Alert.alert('Security Mode Activated', 'The system will detect intruders and trigger an alarm.');
+      if (isProximityAvailable) {
+        subscribe(handleProximityChange);
+        Alert.alert('Security Mode Activated', 'The system will detect intruders and trigger an alarm.');
+      } else {
+        Alert.alert(
+          'Sensor não disponível', 
+          'O sensor de proximidade não está disponível neste dispositivo. Use o botão de Teste de Alarme para simular detecção.',
+          [{ text: 'OK' }]
+        );
+      }
     } else {
       unsubscribe();
       stopAlarm();
@@ -45,14 +88,15 @@ export default function SecuritySystem() {
   }, [securityMode]);
   
   const handleProximityChange = async (data) => {
+    console.log('📊 Dados de proximidade recebidos:', data);
     // If proximity is close (typically less than 5cm or device-specific threshold)
     // Different devices may use different thresholds or values
     if (securityMode && data.distance < 5) {
+      console.log('🔍 Detecção de proximidade: objeto próximo detectado!');
       await triggerSecurity();
     }
   };
   
-  // Função triggerSecurity melhorada para o componente SecuritySystem
   const triggerSecurity = async () => {
     console.log('🚨 INICIANDO PROCEDIMENTO DE SEGURANÇA 🚨');
     setShowCamera(true);
@@ -62,10 +106,13 @@ export default function SecuritySystem() {
       console.log('⚠️ Enviando alerta com dados do sensor');
       const alertData = {
         sensorData: {
-          proximityDistance: proximityData.distance,
-          proximityAccuracy: proximityData.accuracy
+          proximityDistance: proximityData?.distance || 0,
+          proximityAccuracy: proximityData?.accuracy || 0,
+          manualTrigger: !isProximityAvailable
         }
       };
+      
+      console.log('📦 Dados do alerta:', alertData);
       
       // Enviando alerta em paralelo enquanto preparamos a câmera
       const alertPromise = sendAlert(alertData).catch(error => {
@@ -90,6 +137,9 @@ export default function SecuritySystem() {
       // Aguardar resultado do envio do alerta
       const alertResult = await alertPromise;
       console.log('📡 Resultado do envio de alerta:', alertResult);
+      
+      // Atualizar estado do alarme do servidor após enviar alerta
+      await checkServerAlarmStatus();
       
       if (photo) {
         try {
@@ -151,6 +201,23 @@ export default function SecuritySystem() {
     }
   };
   
+  const handleStopServerAlarm = async () => {
+    try {
+      console.log('🔇 Enviando solicitação para parar alarme no servidor');
+      const result = await stopServerAlarm();
+      console.log('✅ Alarme do servidor parado:', result);
+      
+      // Atualizar o estado local
+      setIsServerAlarmActive(false);
+      
+      // Mostrar confirmação ao usuário
+      Alert.alert('Sucesso', 'Alarme no servidor foi desligado com sucesso.');
+    } catch (error) {
+      console.error('❌ Erro ao parar alarme no servidor:', error);
+      Alert.alert('Erro', `Falha ao desligar alarme no servidor: ${error.message}`);
+    }
+  };
+  
   if (hasPermission === null) {
     return <View style={styles.container}><Text>Requesting permissions...</Text></View>;
   }
@@ -183,6 +250,9 @@ export default function SecuritySystem() {
         <Text style={styles.statusText}>
           Security Mode: {securityMode ? 'Active' : 'Inactive'}
         </Text>
+        <Text style={[styles.statusText, isServerAlarmActive ? styles.statusError : styles.statusText]}>
+          Server Alarm: {isServerAlarmActive ? 'ACTIVE' : 'Inactive'}
+        </Text>
       </View>
       
       <View style={styles.buttonContainer}>
@@ -196,13 +266,35 @@ export default function SecuritySystem() {
           </Text>
         </TouchableOpacity>
         
+        {/* Botão de teste de alarme para quando o sensor não está disponível */}
+        {securityMode && !isProximityAvailable && (
+          <TouchableOpacity
+            style={[styles.button, styles.testButton]}
+            onPress={triggerSecurity}
+          >
+            <FontAwesome name="bell" size={24} color="white" />
+            <Text style={styles.buttonText}>Teste de Alarme</Text>
+          </TouchableOpacity>
+        )}
+        
         {isAlarmActive && (
           <TouchableOpacity
             style={[styles.button, styles.alarmButton]}
             onPress={stopAlarm}
           >
             <FontAwesome name="volume-off" size={24} color="white" />
-            <Text style={styles.buttonText}>Stop Alarm</Text>
+            <Text style={styles.buttonText}>Stop Local Alarm</Text>
+          </TouchableOpacity>
+        )}
+        
+        {/* Botão para parar o alarme no servidor */}
+        {isServerAlarmActive && (
+          <TouchableOpacity
+            style={[styles.button, styles.serverAlarmButton]}
+            onPress={handleStopServerAlarm}
+          >
+            <FontAwesome name="bell-slash" size={24} color="white" />
+            <Text style={styles.buttonText}>Stop Server Alarm</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -214,21 +306,12 @@ export default function SecuritySystem() {
         animationType="slide"
       >
         <View style={styles.cameraContainer}>
-          {/* Modificar esta parte do código */}
           {showCamera && (
-            <View style={styles.cameraContainer}>
-              {cameraRef ? (
-                <Camera 
-                  ref={cameraRef}
-                  style={styles.camera}
-                  type={type || Camera.Constants.Type.back}
-                />
-              ) : (
-                <View style={styles.camera}>
-                  <Text>Camera não disponível</Text>
-                </View>
-              )}
-            </View>
+            <Camera 
+              ref={cameraRef}
+              style={styles.camera}
+              type={type === Camera.Constants.Type.back ? Camera.Constants.Type.back : Camera.Constants.Type.front}
+            />
           )}
         </View>
       </Modal>
@@ -274,6 +357,12 @@ const styles = StyleSheet.create({
   },
   alarmButton: {
     backgroundColor: '#F44336',
+  },
+  serverAlarmButton: {
+    backgroundColor: '#E91E63',
+  },
+  testButton: {
+    backgroundColor: '#FFC107',
   },
   buttonText: {
     color: 'white',
