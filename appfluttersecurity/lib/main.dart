@@ -57,7 +57,7 @@ class _SecurityHomePageState extends State<SecurityHomePage> with WidgetsBinding
   bool _isSecurityModeActive = false;
   bool _isAlarming = false;
   bool _isServerConnected = false;
-  String _serverAddress = '192.168.1.100:5000'; // Endereço padrão, altere conforme necessário
+  String _serverAddress = '10.0.0.102:5000'; // Endereço padrão, altere conforme necessário
   String _statusMessage = 'Sistema desativado';
   
   CameraController? _cameraController;
