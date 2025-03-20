@@ -144,6 +144,7 @@ class _SecurityHomePageState extends State<SecurityHomePage> with WidgetsBinding
     
     _startProximitySensor();
     
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Modo de segurança ativado')),
     );
@@ -158,6 +159,7 @@ class _SecurityHomePageState extends State<SecurityHomePage> with WidgetsBinding
       _statusMessage = 'Sistema desativado';
     });
     
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Modo de segurança desativado')),
     );
@@ -165,8 +167,7 @@ class _SecurityHomePageState extends State<SecurityHomePage> with WidgetsBinding
   
   void _startProximitySensor() {
     _proximitySubscription = ProximitySensor.events.listen((event) {
-      // O sensor de proximidade normalmente retorna "true" quando algo está próximo
-      if (event && _isSecurityModeActive) {
+      if (event is bool && (event as bool) && _isSecurityModeActive) {
         // Usa um debounce para evitar múltiplos alertas em sequência
         if (_debounceTimer?.isActive ?? false) return;
         
@@ -530,7 +531,7 @@ class _SecurityHomePageState extends State<SecurityHomePage> with WidgetsBinding
             width: double.infinity,
             child: ElevatedButton.icon(
               onPressed: _isServerConnected ? _toggleSecurityMode : null,
-              icon: Icon(_isSecurityModeActive ? Icons.security_off : Icons.security),
+              icon: Icon(_isSecurityModeActive ? Icons.security_outlined : Icons.security),
               label: Text(_isSecurityModeActive ? 'Desativar Segurança' : 'Ativar Segurança'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: _isSecurityModeActive ? Colors.grey : Colors.green,
